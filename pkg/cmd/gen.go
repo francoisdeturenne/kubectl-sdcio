@@ -413,6 +413,10 @@ func (o *GenOptions) generateSDCConfig(template map[string]interface{}) SDCConfi
 		Metadata: SDCMetadata{
 			Name:      name,
 			Namespace: "default",
+			Labels: map[string]string{
+				"config.sdcio.dev/targetName":      "targetName",
+				"config.sdcio.dev/targetNamespace": "default",
+			},
 		},
 		Spec: SDCSpec{
 			Lifecycle: SDCLifecycle{
