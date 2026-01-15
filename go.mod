@@ -7,6 +7,8 @@ go 1.24.0
 toolchain go1.24.3
 
 require (
+	github.com/openconfig/goyang v1.6.3
+	gopkg.in/yaml.v2 v2.4.0
 	github.com/sdcio/config-server v0.0.54
 	github.com/sdcio/sdc-protos v0.0.46
 	github.com/spf13/cobra v1.9.1
@@ -71,7 +73,6 @@ require (
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.65.0 // indirect
 	github.com/prometheus/procfs v0.16.1 // indirect
-	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xlab/treeprint v1.2.0 // indirect
 	go.etcd.io/etcd/api/v3 v3.5.21 // indirect

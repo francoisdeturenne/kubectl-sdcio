@@ -37,11 +37,21 @@ func main() {
 		},
 	}
 
+	// Add existing blame command
 	blameCmd, err := sdcioCmd.NewCmdBlame(genericiooptions.IOStreams{In: os.Stdin, Out: os.Stdout, ErrOut: os.Stderr})
 	if err != nil {
 		panic(err)
 	}
 	root.AddCommand(blameCmd)
+
+	// Add new gen command
+	genCmd, err := sdcioCmd.CmdGen(genericiooptions.IOStreams{In: os.Stdin, Out: os.Stdout, ErrOut: os.Stderr})
+	if err != nil {
+		panic(err)
+	}
+	root.AddCommand(genCmd)
+
+	// Add completion command
 	root.AddCommand(completionCmd)
 	root.Version = "v0.0.0"
 	root.CompletionOptions.DisableDefaultCmd = false
@@ -51,7 +61,6 @@ func main() {
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}
-
 }
 
 var err error
