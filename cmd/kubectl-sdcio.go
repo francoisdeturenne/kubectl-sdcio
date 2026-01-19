@@ -44,12 +44,19 @@ func main() {
 	}
 	root.AddCommand(blameCmd)
 
-	// Add new gen command
+	// Add gen command
 	genCmd, err := sdcioCmd.CmdGen(genericiooptions.IOStreams{In: os.Stdin, Out: os.Stdout, ErrOut: os.Stderr})
 	if err != nil {
 		panic(err)
 	}
 	root.AddCommand(genCmd)
+
+	//Add search command
+	searchCmd, err := sdcioCmd.CmdSearch(genericiooptions.IOStreams{In: os.Stdin, Out: os.Stdout, ErrOut: os.Stderr})
+	if err != nil {
+		panic(err)
+	}
+	root.AddCommand(searchCmd)
 
 	// Add completion command
 	root.AddCommand(completionCmd)
