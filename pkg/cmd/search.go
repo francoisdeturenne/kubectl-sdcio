@@ -34,21 +34,24 @@ import (
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 )
 
-type SearchOptions struct {
-	yangPath      string
-	keyword       string
-	outputFormat  string
-	outputFile    string
-	caseSensitive bool
-	MyOptions
+type SearchResult struct {
+	Path         string          `json:"path" yaml:"path"`
+	LeafName     string          `json:"leaf_name" yaml:"leaf_name"`
+	Type         string          `json:"type" yaml:"type"`
+	Description  string          `json:"description,omitempty" yaml:"description,omitempty"`
+	Keys         []string        `json:"keys,omitempty" yaml:"keys,omitempty"`
+	Dependencies *DependencyInfo `json:"dependencies,omitempty" yaml:"dependencies,omitempty"` // New field
 }
 
-type SearchResult struct {
-	Path        string
-	LeafName    string
-	Type        string
-	Description string
-	Keys        []string // Added to track keys at this level
+// flags to SearchOptions
+type SearchOptions struct {
+	yangPath            string
+	keyword             string
+	outputFormat        string
+	outputFile          string
+	caseSensitive       bool
+	includeDependencies bool
+	MyOptions
 }
 
 // NewSearchOptions provides an instance of SearchOptions with default values
@@ -110,6 +113,7 @@ func (o *SearchOptions) Run(_ *cobra.Command) error {
 	return o.outputResults(results, moduleName)
 }
 
+// look for paths
 func (o *SearchOptions) searchInYang() ([]SearchResult, string, error) {
 	// Create a new module set
 	ms := yang.NewModules()
@@ -153,7 +157,13 @@ func (o *SearchOptions) searchInYang() ([]SearchResult, string, error) {
 
 	// Search for matching paths
 	var results []SearchResult
-	o.searchEntry(rootEntry, []string{}, &results)
+	if o.includeDependencies {
+		// Use dependency-aware search
+		results = o.searchWithDependencies(rootEntry)
+	} else {
+		// Use simple search (existing logic)
+		o.searchEntry(rootEntry, []string{}, &results)
+	}
 
 	// Sort results by path
 	sort.Slice(results, func(i, j int) bool {
@@ -408,13 +418,18 @@ func (o *SearchOptions) formatAsText(results []SearchResult) string {
 
 	for i, result := range results {
 		sb.WriteString(fmt.Sprintf("%d. Path: %s\n", i+1, result.Path))
-		//sb.WriteString(fmt.Sprintf("   Leaf: %s\n", result.LeafName))
 		sb.WriteString(fmt.Sprintf("   Type: %s\n", result.Type))
 		if len(result.Keys) > 0 {
 			sb.WriteString(fmt.Sprintf("   Keys: %s\n", strings.Join(result.Keys, ", ")))
 		}
+
+		// Display dependencies if present
+		if result.Dependencies != nil && o.includeDependencies {
+			collector := NewDependencyCollector(o)
+			sb.WriteString(collector.FormatDependencies(result.Dependencies))
+		}
+
 		if result.Description != "" {
-			// Truncate long descriptions
 			desc := result.Description
 			if len(desc) > 100 {
 				desc = desc[:97] + "..."
@@ -455,6 +470,79 @@ func (o *SearchOptions) formatAsYAML(results []SearchResult) (string, error) {
 		return "", fmt.Errorf("error marshaling YAML: %v", err)
 	}
 	return string(bytes), nil
+}
+
+// searchWithDependencies performs search with dependency collection
+func (o *SearchOptions) searchWithDependencies(rootEntry *yang.Entry) []SearchResult {
+	var results []SearchResult
+
+	// Create dependency collector
+	collector := NewDependencyCollector(o)
+
+	// Build reverse reference index
+	collector.BuildReverseReferenceIndex(rootEntry)
+
+	// Search with context
+	context := NewPathContext()
+	o.searchEntryWithContext(rootEntry, context, &results, collector)
+
+	// Populate reverse references
+	collector.PopulateReferencedBy(results)
+
+	return results
+}
+
+// searchEntryWithContext performs search while tracking context for dependencies
+func (o *SearchOptions) searchEntryWithContext(entry *yang.Entry, context *PathContext, results *[]SearchResult, collector *DependencyCollector) {
+	if entry == nil {
+		return
+	}
+
+	// Clone context for this level
+	currentContext := context.Clone()
+
+	// Add current entry to path
+	if entry.Name != "" {
+		pathPart := o.buildPathPartWithKeys(entry)
+		currentContext.AddPathPart(pathPart)
+
+		// If this is a list, add its keys to the context
+		if entry.ListAttr != nil && entry.Key != "" {
+			listPath := currentContext.GetFullPath()
+			keyNames := strings.Fields(entry.Key)
+			currentContext.AddListKey(listPath, keyNames)
+		}
+	}
+
+	fullPath := currentContext.GetFullPath()
+
+	// Check if current entry matches the search criteria
+	if o.matchesSearch(entry, fullPath) {
+		result := SearchResult{
+			Path:        fullPath,
+			LeafName:    entry.Name,
+			Type:        o.getEntryType(entry),
+			Description: entry.Description,
+			Keys:        o.getEntryKeys(entry),
+		}
+
+		// Collect dependencies if enabled
+		if o.includeDependencies {
+			result.Dependencies = collector.CollectDependencies(entry, currentContext)
+		}
+
+		*results = append(*results, result)
+	}
+
+	// Increment key levels for children
+	currentContext.IncrementKeyLevels()
+
+	// Recursively search in children
+	if entry.Dir != nil {
+		for _, child := range entry.Dir {
+			o.searchEntryWithContext(child, currentContext, results, collector)
+		}
+	}
 }
 
 // CmdSearch provides a cobra command wrapping SearchOptions
@@ -519,7 +607,7 @@ Examples:
 	cmd.Flags().StringVar(&o.outputFormat, "format", "text", "Output format: text, json, yaml (default: text)")
 	cmd.Flags().StringVarP(&o.outputFile, "output", "o", "", "Output file (default: stdout)")
 	cmd.Flags().BoolVar(&o.caseSensitive, "case-sensitive", false, "Enable case-sensitive search (default: false)")
-
+	cmd.Flags().BoolVar(&o.includeDependencies, "deepy", true, "Include dependency information in results (default: true)")
 	// Completion for formats
 	if err := cmd.RegisterFlagCompletionFunc("format", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		return []string{"text", "json", "yaml"}, cobra.ShellCompDirectiveNoFileComp

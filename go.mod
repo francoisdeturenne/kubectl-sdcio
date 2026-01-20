@@ -8,7 +8,6 @@ toolchain go1.24.3
 
 require (
 	github.com/openconfig/goyang v1.6.3
-	gopkg.in/yaml.v2 v2.4.0
 	github.com/sdcio/config-server v0.0.54
 	github.com/sdcio/sdc-protos v0.0.46
 	github.com/spf13/cobra v1.9.1
