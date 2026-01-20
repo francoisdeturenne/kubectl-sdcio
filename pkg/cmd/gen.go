@@ -35,6 +35,8 @@ type GenOptions struct {
 	modelPath    string
 	outputFormat string
 	outputFile   string
+	rootEntry    *yang.Entry
+	namespace    string
 	MyOptions
 }
 
@@ -66,6 +68,12 @@ type SDCLifecycle struct {
 type SDCConfigItem struct {
 	Path  string      `yaml:"path"`
 	Value interface{} `yaml:"value"`
+}
+
+// KeyValue represents a key-value pair extracted from the path
+type KeyValue struct {
+	Name  string
+	Value string
 }
 
 func stripKeysFromPath(path string) string {
@@ -177,12 +185,17 @@ func (o *GenOptions) generateTemplateFromYang() (map[string]interface{}, error) 
 	if entry == nil {
 		return nil, fmt.Errorf("path '%s' not found in YANG model", o.modelPath)
 	}
+	// Store root entry and namespace for XML generation
+	o.rootEntry = rootEntry
+	if mainModule.Namespace != nil {
+		o.namespace = mainModule.Namespace.Name
+	}
 
 	// Generate the template
 	template := o.generateTemplate(entry)
-	// Extract and remove keys from path for format sdc
+	// Extract and remove keys from path for format sdc and xml
 	keysToExclude := o.extractKeysFromPath(o.modelPath)
-	if len(keysToExclude) > 0 && o.outputFormat == "sdc-conf" {
+	if len(keysToExclude) > 0 && (o.outputFormat == "sdc-conf" || o.outputFormat == "xml") {
 		template = o.removeKeysFromTemplate(template, keysToExclude)
 	}
 	return template, nil
@@ -526,6 +539,12 @@ func (o *GenOptions) outputTemplate(template map[string]interface{}) error {
 }
 
 func (o *GenOptions) outputXML(data interface{}, depth int) error {
+	// If this is the root call (depth 0), generate the full path structure
+	if depth == 0 {
+		return o.outputXMLWithPath(data)
+	}
+
+	// For nested calls, use the simple output
 	indent := strings.Repeat("  ", depth)
 
 	switch v := data.(type) {
@@ -547,6 +566,147 @@ func (o *GenOptions) outputXML(data interface{}, depth int) error {
 		fmt.Fprintf(o.Out, "%s%v\n", indent, v)
 	}
 	return nil
+}
+
+func (o *GenOptions) outputXMLWithPath(data interface{}) error {
+	// Parse the path to get all segments
+	cleanPath := stripKeysFromPath(strings.Trim(o.modelPath, "/"))
+	pathSegments := []string{}
+	if cleanPath != "" && cleanPath != "/" {
+		pathSegments = strings.Split(cleanPath, "/")
+	}
+	
+	// Check if the last path segment matches a key in the data map
+	if len(pathSegments) > 0 {
+		if dataMap, ok := data.(map[string]interface{}); ok {
+			lastSegment := pathSegments[len(pathSegments)-1]
+			// If the data contains a key matching the last segment, remove it from path
+			if _, exists := dataMap[lastSegment]; exists {
+				pathSegments = pathSegments[:len(pathSegments)-1]
+			}
+		}
+	}
+	// Extract keys from the original path
+	pathKeys := o.extractPathKeysWithValues(o.modelPath)
+
+	// Start building XML with root element and namespace
+	rootName := ""
+	if o.rootEntry != nil {
+		rootName = o.rootEntry.Name
+	}
+	if rootName == "" {
+		rootName = "root"
+	}
+
+	// Write root element with namespace
+	if o.namespace != "" {
+		fmt.Fprintf(o.Out, "<%s xmlns=\"%s\">\n", rootName, o.namespace)
+	} else {
+		fmt.Fprintf(o.Out, "<%s>\n", rootName)
+	}
+	//remove last path segment if identical to last data element
+	
+	// Build the path structure
+	o.buildXMLPath(pathSegments, pathKeys, data, 1)
+
+	// Close root element
+	fmt.Fprintf(o.Out, "</%s>\n", rootName)
+
+	return nil
+}
+
+func (o *GenOptions) buildXMLPath(pathSegments []string, pathKeys map[string][]KeyValue, data interface{}, depth int) {
+	indent := strings.Repeat(" ", depth)
+
+	if len(pathSegments) == 0 {
+		// We've reached the target path, output the actual data
+		o.outputXMLData(data, depth)
+		return
+	}
+
+	// Get current segment
+	currentSegment := pathSegments[0]
+	remainingSegments := pathSegments[1:]
+
+	
+	
+	fmt.Fprintf(o.Out, "%s<%s>\n", indent, currentSegment)
+
+	// Check if this segment has keys
+	if keys, hasKeys := pathKeys[currentSegment]; hasKeys {
+		// Output key elements
+		for _, kv := range keys {
+			fmt.Fprintf(o.Out, "%s <%s>%s</%s>\n", indent, kv.Name, kv.Value, kv.Name)
+		}
+	}
+
+	// Continue with remaining path
+	o.buildXMLPath(remainingSegments, pathKeys, data, depth+1)
+
+	// Close current element
+	fmt.Fprintf(o.Out, "%s</%s>\n", indent, currentSegment)
+	
+}
+
+func (o *GenOptions) outputXMLData(data interface{}, depth int) {
+	indent := strings.Repeat(" ", depth)
+
+	switch v := data.(type) {
+	case map[string]interface{}:
+		for key, value := range v {
+			if strings.HasPrefix(key, "_") {
+				// Skip metadata for XML
+				continue
+			}
+			fmt.Fprintf(o.Out, "%s<%s>\n", indent, key)
+			o.outputXMLData(value, depth+1)
+			fmt.Fprintf(o.Out, "%s</%s>\n", indent, key)
+		}
+	case []interface{}:
+		for _, item := range v {
+			o.outputXMLData(item, depth)
+		}
+	default:
+		fmt.Fprintf(o.Out, "%s%v\n", indent, v)
+	}
+}
+
+// extractPathKeysWithValues extracts keys and their placeholder values from the path
+// Returns a map where the key is the list name and value is a slice of KeyValue pairs
+func (o *GenOptions) extractPathKeysWithValues(path string) map[string][]KeyValue {
+	result := make(map[string][]KeyValue)
+
+	// Match patterns like registered-ue-per-ta-list[name=<key>]
+	// or tac[serving-plmn=<key>,tac=<key>]
+	re := regexp.MustCompile(`([^/\[]+)\[([^\]]+)\]`)
+	matches := re.FindAllStringSubmatch(path, -1)
+
+	for _, match := range matches {
+		if len(match) > 2 {
+			listName := match[1]
+			keysStr := match[2]
+
+			// Parse individual keys
+			keyPairs := strings.Split(keysStr, ",")
+			var keyValues []KeyValue
+
+			for _, keyPair := range keyPairs {
+				parts := strings.Split(keyPair, "=")
+				if len(parts) == 2 {
+					keyName := strings.TrimSpace(parts[0])
+					keyValue := strings.Trim(strings.TrimSpace(parts[1]), "<>")
+					keyValues = append(keyValues, KeyValue{
+						Name:  keyName,
+						Value: keyValue,
+					})
+				}
+			}
+
+			result[listName] = keyValues
+		}
+	}
+
+	return result
 }
 
 // CmdGen provides a cobra command wrapping GenOptions
