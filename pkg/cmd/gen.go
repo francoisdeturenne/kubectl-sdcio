@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/openconfig/goyang/pkg/yang"
@@ -65,6 +66,12 @@ type SDCLifecycle struct {
 type SDCConfigItem struct {
 	Path  string      `yaml:"path"`
 	Value interface{} `yaml:"value"`
+}
+
+func stripKeysFromPath(path string) string {
+	// Use regex to remove key expressions like [name=<key>], [tac=<key>], etc.
+	re := regexp.MustCompile(`\[[^\]]+=<[^>]+>\]`)
+	return re.ReplaceAllString(path, "")
 }
 
 // NewGenOptions provides an instance of GenOptions with default values
@@ -165,13 +172,19 @@ func (o *GenOptions) generateTemplateFromYang() (map[string]interface{}, error) 
 	}
 
 	// Find the entry corresponding to the specified path
-	entry := o.findEntryByPath(rootEntry, o.modelPath)
+	cleanPath := stripKeysFromPath(o.modelPath)
+	entry := o.findEntryByPath(rootEntry, cleanPath)
 	if entry == nil {
 		return nil, fmt.Errorf("path '%s' not found in YANG model", o.modelPath)
 	}
 
 	// Generate the template
 	template := o.generateTemplate(entry)
+	// Extract and remove keys from path for format sdc
+	keysToExclude := o.extractKeysFromPath(o.modelPath)
+	if len(keysToExclude) > 0 && o.outputFormat == "sdc-conf" {
+		template = o.removeKeysFromTemplate(template, keysToExclude)
+	}
 	return template, nil
 }
 
@@ -394,12 +407,14 @@ func (o *GenOptions) getDefaultValueForType(yangType *yang.YangType) interface{}
 	}
 }
 
+// SDC Template
 func (o *GenOptions) generateSDCConfig(template map[string]interface{}) SDCConfig {
 	// Generate name with path suffix
 	name := "gen-sdcio-config"
+
 	if o.modelPath != "/" && o.modelPath != "" {
 		// Clean the path and get the last part
-		cleanPath := strings.Trim(o.modelPath, "/")
+		cleanPath := stripKeysFromPath(strings.Trim(o.modelPath, "/"))
 		if cleanPath != "" {
 			pathParts := strings.Split(cleanPath, "/")
 			lastPart := pathParts[len(pathParts)-1]
@@ -597,4 +612,51 @@ Examples:
 	}
 
 	return cmd, nil
+}
+
+// remove keys attributes that are in the path
+func (o *GenOptions) removeKeysFromTemplate(template map[string]interface{}, keys []string) map[string]interface{} {
+	result := make(map[string]interface{})
+
+	for k, v := range template {
+		// Skip if this key should be excluded
+		if o.shouldExclude(k, keys) {
+			continue
+		}
+
+		// Recursively process nested maps
+		if nestedMap, ok := v.(map[string]interface{}); ok {
+			result[k] = o.removeKeysFromTemplate(nestedMap, keys)
+		} else {
+			result[k] = v
+		}
+	}
+
+	return result
+}
+
+// find keys in path
+func (o *GenOptions) extractKeysFromPath(path string) []string {
+	var keys []string
+	// Match patterns like [name=<key>], [tac=<key>], etc.
+	//re := regexp.MustCompile(`\[([^=]+)=<[^>]+>\]`)
+	re := regexp.MustCompile(`([^=\[,]+)=<[^>]+>`)
+	matches := re.FindAllStringSubmatch(path, -1)
+
+	for _, match := range matches {
+		if len(match) > 1 {
+			keys = append(keys, match[1])
+		}
+	}
+	return keys
+}
+
+// test attribute/key
+func (o *GenOptions) shouldExclude(name string, excludeKeys []string) bool {
+	for _, key := range excludeKeys {
+		if name == key {
+			return true
+		}
+	}
+	return false
 }

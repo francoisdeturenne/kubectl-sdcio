@@ -23,6 +23,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	//"github.com/openconfig/goyang/pkg/yang"
+	//"github.com/sdcio/kubectl-sdcio/pkg/cmd"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
@@ -252,3 +254,177 @@ func min(a, b int) int {
 	}
 	return b
 }
+
+func TestFindEntryByPath_WithKeys(t *testing.T) {
+	yangFile := "/Users/efde6331/stu/nf-sim-integrated/devsim/yang/nokia-cmm-24.7/nokia-cn-cmm-conf.yang"
+
+	tests := []struct {
+		name        string
+		path        string
+		expectFound bool
+		expectName  string
+	}{
+
+		{
+			name:        "Path with 3 keys",
+			path:        "/configure/mme/roam-restrict/registered-ue-per-ta-list[name=<key>]/tac[serving-plmn=<key>,tac=<key>]",
+			expectFound: true,
+			expectName:  "tac",
+		},
+		{
+			name:        "Path with single key placeholder 2",
+			path:        "/configure/amf/mobile-network/plmn[name=<key>]/non-3gpp-tai[tac=<key>]/tac",
+			expectFound: true,
+			expectName:  "tac",
+		},
+		{
+			name:        "Path without keys",
+			path:        "/configure/amf/mobile-network/plmn/non-3gpp-tai/tac",
+			expectFound: true,
+			expectName:  "tac",
+		},
+		{
+			name:        "Root path",
+			path:        "/",
+			expectFound: true,
+			expectName:  "configure",
+		},
+		{
+			name:        "Path with multiple keys",
+			path:        "/configure/amf/mobile-network/plmn[name=<key>]/non-3gpp-tai[tac=<key>]",
+			expectFound: true,
+			expectName:  "non-3gpp-tai",
+		},
+		{
+			name:        "Invalid path",
+			path:        "/configure/invalid/path",
+			expectFound: false,
+			expectName:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create GenOptions with the YANG file
+			buf := &bytes.Buffer{}
+			streams := genericiooptions.IOStreams{
+				In:     &bytes.Buffer{},
+				Out:    buf,
+				ErrOut: &bytes.Buffer{},
+			}
+			tmpDir := t.TempDir()
+			outputFile := filepath.Join(tmpDir, "call-trace-template.json")
+			cmd, err := CmdGen(streams)
+			require.NoError(t, err)
+			args := []string{
+				"--yang", yangFile,
+				"--path", tt.path,
+				"--format", "sdc-conf",
+				"--output", outputFile,
+			}
+
+			cmd.SetArgs(args)
+
+			// Generate template (this internally calls findEntryByPath)
+			err = cmd.Execute()
+			require.NoError(t, err)
+
+			if tt.expectFound {
+				if err != nil {
+					t.Fatalf("Expected to find entry for path '%s', but got error: %v", tt.path, err)
+				}
+				// Verify file was created
+				assert.FileExists(t, outputFile)
+
+			} else {
+				if err == nil {
+					t.Fatalf("Expected error for invalid path '%s', but got none", tt.path)
+				}
+			}
+		})
+	}
+}
+
+/*
+func TestStripKeysFromPath(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "Path with single key",
+			input:    "/configure/amf/mobile-network/plmn[name=<key>]/non-3gpp-tai",
+			expected: "/configure/amf/mobile-network/plmn/non-3gpp-tai",
+		},
+		{
+			name:     "Path with multiple keys",
+			input:    "/configure/amf/mobile-network/plmn[name=<key>]/non-3gpp-tai[tac=<key>]/tac",
+			expected: "/configure/amf/mobile-network/plmn/non-3gpp-tai/tac",
+		},
+		{
+			name:     "Path without keys",
+			input:    "/configure/amf/mobile-network/plmn/non-3gpp-tai/tac",
+			expected: "/configure/amf/mobile-network/plmn/non-3gpp-tai/tac",
+		},
+		{
+			name:     "Empty path",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "Root path",
+			input:    "/",
+			expected: "/",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := cmd.StripKeysFromPath(tt.input)
+			if result != tt.expected {
+				t.Errorf("StripKeysFromPath(%s) = %s; want %s", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+
+func TestGenerateTemplateWithKeys(t *testing.T) {
+	yangFile := "/Users/efde6331/stu/nf-sim-integrated/devsim/yang/nokia-cmm-24.7/nokia-cn-cmm-conf.yang"
+
+	streams := genericiooptions.IOStreams{}
+	o := cmd.NewGenOptions(streams)
+	o.SetYangPath(yangFile)
+	o.SetModelPath("/configure/amf/mobile-network/plmn[name=<key>]/non-3gpp-tai[tac=<key>]/tac")
+	o.SetOutputFormat("json")
+
+	template, err := o.GenerateTemplateFromYang()
+	if err != nil {
+		t.Fatalf("Failed to generate template: %v", err)
+	}
+
+	if template == nil {
+		t.Fatal("Expected non-nil template")
+	}
+
+	// Check that the template contains expected structure
+	if _, ok := template["tac"]; !ok {
+		t.Error("Expected template to contain 'tac' key")
+	}
+
+	// Path with keys (placeholders)
+	path := "/configure/amf/mobile-network/plmn[name=<key>]/non-3gpp-tai[tac=<key>]/tac"
+
+	// Call findEntryByPath
+	entry := &cmd.GenOptions{}
+	found := entry.findEntryByPath(root, path)
+
+	if found == nil {
+		t.Fatalf("Expected to find an entry for path: %s", path)
+	}
+
+	if found.Name != "tac" {
+		t.Errorf("Expected to find 'tac' node, got '%s'", found.Name)
+	}
+}*/

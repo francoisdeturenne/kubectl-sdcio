@@ -1,4 +1,5 @@
 /*
+
 Copyright 2018 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,6 +13,7 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+
 */
 
 package cmd
@@ -46,6 +48,7 @@ type SearchResult struct {
 	LeafName    string
 	Type        string
 	Description string
+	Keys        []string // Added to track keys at this level
 }
 
 // NewSearchOptions provides an instance of SearchOptions with default values
@@ -139,7 +142,7 @@ func (o *SearchOptions) searchInYang() ([]SearchResult, string, error) {
 	}
 
 	if mainModule == nil {
-		return nil, "",fmt.Errorf("no valid module found in YANG file")
+		return nil, "", fmt.Errorf("no valid module found in YANG file")
 	}
 
 	// Create root entry from module
@@ -165,13 +168,15 @@ func (o *SearchOptions) searchEntry(entry *yang.Entry, currentPath []string, res
 		return
 	}
 
-	// Build current path
+	// Build current path with keys
 	var pathParts []string
 	if len(currentPath) > 0 {
 		pathParts = append(pathParts, currentPath...)
 	}
 	if entry.Name != "" {
-		pathParts = append(pathParts, entry.Name)
+		// Add the entry name with keys if it's a list
+		pathPart := o.buildPathPartWithKeys(entry)
+		pathParts = append(pathParts, pathPart)
 	}
 	fullPath := "/" + strings.Join(pathParts, "/")
 
@@ -182,6 +187,7 @@ func (o *SearchOptions) searchEntry(entry *yang.Entry, currentPath []string, res
 			LeafName:    entry.Name,
 			Type:        o.getEntryType(entry),
 			Description: entry.Description,
+			Keys:        o.getEntryKeys(entry),
 		}
 		*results = append(*results, result)
 	}
@@ -192,6 +198,35 @@ func (o *SearchOptions) searchEntry(entry *yang.Entry, currentPath []string, res
 			o.searchEntry(child, pathParts, results)
 		}
 	}
+}
+
+// buildPathPartWithKeys builds a path part including keys for list entries
+func (o *SearchOptions) buildPathPartWithKeys(entry *yang.Entry) string {
+	if entry.Key == "" {
+		return entry.Name
+	}
+
+	// This is a list with keys
+	keys := strings.Fields(entry.Key)
+	if len(keys) == 0 {
+		return entry.Name
+	}
+
+	// Build the key predicates
+	var keyPredicates []string
+	for _, key := range keys {
+		keyPredicates = append(keyPredicates, fmt.Sprintf("%s=<key>", key))
+	}
+
+	return fmt.Sprintf("%s[%s]", entry.Name, strings.Join(keyPredicates, ","))
+}
+
+// getEntryKeys extracts the keys from a list entry
+func (o *SearchOptions) getEntryKeys(entry *yang.Entry) []string {
+	if entry.Key == "" {
+		return nil
+	}
+	return strings.Fields(entry.Key)
 }
 
 func (o *SearchOptions) matchesSearch(entry *yang.Entry, fullPath string) bool {
@@ -308,8 +343,16 @@ func (o *SearchOptions) removeModulePrefix(path string, moduleName string) strin
 	parts := strings.Split(cleanPath, "/")
 
 	// If the first part is the module name, remove it
-	if len(parts) > 0 && parts[0] == moduleName {
-		parts = parts[1:]
+	if len(parts) > 0 {
+		// Extract the name without key predicates
+		firstPart := parts[0]
+		if idx := strings.Index(firstPart, "["); idx != -1 {
+			firstPart = firstPart[:idx]
+		}
+
+		if firstPart == moduleName {
+			parts = parts[1:]
+		}
 	}
 
 	// Reconstruct the path
@@ -365,8 +408,11 @@ func (o *SearchOptions) formatAsText(results []SearchResult) string {
 
 	for i, result := range results {
 		sb.WriteString(fmt.Sprintf("%d. Path: %s\n", i+1, result.Path))
-		sb.WriteString(fmt.Sprintf("   Leaf: %s\n", result.LeafName))
+		//sb.WriteString(fmt.Sprintf("   Leaf: %s\n", result.LeafName))
 		sb.WriteString(fmt.Sprintf("   Type: %s\n", result.Type))
+		if len(result.Keys) > 0 {
+			sb.WriteString(fmt.Sprintf("   Keys: %s\n", strings.Join(result.Keys, ", ")))
+		}
 		if result.Description != "" {
 			// Truncate long descriptions
 			desc := result.Description
