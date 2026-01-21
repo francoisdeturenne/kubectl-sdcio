@@ -21,7 +21,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -116,41 +115,18 @@ func (o *SearchOptions) Run(_ *cobra.Command) error {
 // look for paths
 func (o *SearchOptions) searchInYang() ([]SearchResult, string, error) {
 	// Create a new module set
-	ms := yang.NewModules()
+	ms, err := utils.LoadYangModule(o.yangPath)
 
-	// Load the YANG file
-	if err := ms.Read(o.yangPath); err != nil {
-		return nil, "", fmt.Errorf("failed to read YANG file: %v", err)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to read YANG module: %v", err)
 	}
 
-	// Process the modules
-	if errs := ms.Process(); len(errs) > 0 {
-		var errMsgs []string
-		for _, err := range errs {
-			errMsgs = append(errMsgs, err.Error())
-		}
-		return nil, "", fmt.Errorf("failed to process YANG modules: %s", strings.Join(errMsgs, "; "))
-	}
-
-	// Find the main module
-	var mainModule *yang.Module
-
-	for _, module := range ms.Modules {
-		if module != nil {
-			// Check if this module was loaded from our target file
-			if strings.HasPrefix(filepath.Base(o.yangPath), module.Name) {
-				mainModule = module
-				break
-			}
-		}
-	}
-
-	if mainModule == nil {
+	if ms.Module == nil {
 		return nil, "", fmt.Errorf("no valid module found in YANG file")
 	}
 
 	// Create root entry from module
-	rootEntry := yang.ToEntry(mainModule)
+	rootEntry := ms.RootEntry
 	if rootEntry == nil {
 		return nil, "", fmt.Errorf("failed to convert module to entry")
 	}
@@ -170,7 +146,7 @@ func (o *SearchOptions) searchInYang() ([]SearchResult, string, error) {
 		return results[i].Path < results[j].Path
 	})
 
-	return results, mainModule.Name, nil
+	return results, ms.Module.Name, nil
 }
 
 func (o *SearchOptions) searchEntry(entry *yang.Entry, currentPath []string, results *[]SearchResult) {

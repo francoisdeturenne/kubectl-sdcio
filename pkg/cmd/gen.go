@@ -20,11 +20,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/openconfig/goyang/pkg/yang"
+	"github.com/sdcio/kubectl-sdcio/pkg/utils"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v2"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
@@ -139,42 +139,17 @@ func (o *GenOptions) Run(_ *cobra.Command) error {
 
 func (o *GenOptions) generateTemplateFromYang() (map[string]interface{}, error) {
 	// Create a new module set
-	ms := yang.NewModules()
-
-	// Load the YANG file
-	if err := ms.Read(o.yangPath); err != nil {
-		return nil, fmt.Errorf("failed to read YANG file: %v", err)
+	ms, err := utils.LoadYangModule(o.yangPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read YANG module: %v", err)
 	}
 
-	// Process the modules
-	if errs := ms.Process(); len(errs) > 0 {
-		var errMsgs []string
-		for _, err := range errs {
-			errMsgs = append(errMsgs, err.Error())
-		}
-		return nil, fmt.Errorf("failed to process YANG modules: %s", strings.Join(errMsgs, "; "))
-	}
-
-	// Find the main module
-	var mainModule *yang.Module
-
-	for _, module := range ms.Modules {
-		if module != nil {
-			// Check if this module was loaded from our target file
-			if strings.HasPrefix(filepath.Base(o.yangPath), module.Name) {
-				mainModule = module
-				break
-			}
-
-		}
-	}
-
-	if mainModule == nil {
+	if ms.Module == nil {
 		return nil, fmt.Errorf("no valid module found in YANG file")
 	}
 
 	// Create root entry from module
-	rootEntry := yang.ToEntry(mainModule)
+	rootEntry := ms.RootEntry
 	if rootEntry == nil {
 		return nil, fmt.Errorf("failed to convert module to entry")
 	}
@@ -187,8 +162,8 @@ func (o *GenOptions) generateTemplateFromYang() (map[string]interface{}, error) 
 	}
 	// Store root entry and namespace for XML generation
 	o.rootEntry = rootEntry
-	if mainModule.Namespace != nil {
-		o.namespace = mainModule.Namespace.Name
+	if ms.Module.Namespace != nil {
+		o.namespace = ms.Module.Namespace.Name
 	}
 
 	// Generate the template
@@ -575,7 +550,7 @@ func (o *GenOptions) outputXMLWithPath(data interface{}) error {
 	if cleanPath != "" && cleanPath != "/" {
 		pathSegments = strings.Split(cleanPath, "/")
 	}
-	
+
 	// Check if the last path segment matches a key in the data map
 	if len(pathSegments) > 0 {
 		if dataMap, ok := data.(map[string]interface{}); ok {
@@ -605,7 +580,7 @@ func (o *GenOptions) outputXMLWithPath(data interface{}) error {
 		fmt.Fprintf(o.Out, "<%s>\n", rootName)
 	}
 	//remove last path segment if identical to last data element
-	
+
 	// Build the path structure
 	o.buildXMLPath(pathSegments, pathKeys, data, 1)
 
@@ -628,8 +603,6 @@ func (o *GenOptions) buildXMLPath(pathSegments []string, pathKeys map[string][]K
 	currentSegment := pathSegments[0]
 	remainingSegments := pathSegments[1:]
 
-	
-	
 	fmt.Fprintf(o.Out, "%s<%s>\n", indent, currentSegment)
 
 	// Check if this segment has keys
@@ -645,7 +618,7 @@ func (o *GenOptions) buildXMLPath(pathSegments []string, pathKeys map[string][]K
 
 	// Close current element
 	fmt.Fprintf(o.Out, "%s</%s>\n", indent, currentSegment)
-	
+
 }
 
 func (o *GenOptions) outputXMLData(data interface{}, depth int) {

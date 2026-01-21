@@ -2,10 +2,10 @@ package client
 
 import (
 	"context"
-	"regexp"
 	"strings"
 
 	configCR "github.com/sdcio/config-server/pkg/generated/clientset/versioned"
+	"github.com/sdcio/kubectl-sdcio/pkg/utils"
 	sdcpb "github.com/sdcio/sdc-protos/sdcpb"
 	"google.golang.org/protobuf/encoding/protojson"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -113,18 +113,18 @@ func (c *ConfigClient) matchesFilter(node *sdcpb.BlameTreeElement, path []string
 
 	// check leaf name filter
 	if filter.LeafName != "" {
-		leafMatches = c.matchesPattern(node.Name, filter.LeafName)
+		leafMatches = utils.MatchesPattern(node.Name, filter.LeafName, false)
 	}
 
 	// check owner filter
 	if filter.Owner != "" {
-		ownerMatches = c.matchesPattern(node.Owner, filter.Owner)
+		ownerMatches = utils.MatchesPattern(node.Owner, filter.Owner, false)
 	}
 
 	// check whole path filter
 	if filter.Path != "" {
 		fullPath := strings.Join(append(path, node.Name), "/")
-		pathMatches = c.matchesPattern(fullPath, filter.Path)
+		pathMatches = utils.MatchesPattern(fullPath, filter.Path, false)
 	}
 	// check deviation filter
 	if filter.Deviation {
@@ -132,45 +132,6 @@ func (c *ConfigClient) matchesFilter(node *sdcpb.BlameTreeElement, path []string
 	}
 
 	return leafMatches && ownerMatches && pathMatches && deviationMatches
-}
-
-// convert pattern with wildcard to regex
-func wildCardToRegexp(pattern string) string {
-	//escape any . in pattern
-	strings.ReplaceAll(pattern, ".", "\\.")
-	components := strings.Split(pattern, "*")
-	if len(components) == 1 {
-		// if len is 1, there are no *'s, return exact match pattern
-		return "^" + pattern + "$"
-	}
-	var result strings.Builder
-	for i, literal := range components {
-
-		// Replace * with .*
-		if i > 0 {
-			result.WriteString(".*")
-		}
-
-		// Quote any regular expression meta characters in the
-		// literal text.
-		result.WriteString(regexp.QuoteMeta(literal))
-	}
-	return "^" + result.String() + "$"
-}
-
-// matchesPattern checks a string against a pattern (with wildcards)
-func (c *ConfigClient) matchesPattern(text, pattern string) bool {
-	if pattern == "" {
-		return true
-	}
-
-	// Simple wildcards
-	matched, err := regexp.MatchString(wildCardToRegexp(pattern), text)
-	if err != nil {
-		// don't use case sensitivity
-		return strings.Contains(strings.ToLower(text), strings.ToLower(pattern))
-	}
-	return matched
 }
 
 func (c *ConfigClient) GetTargetNames(ctx context.Context, namespace string) ([]string, error) {
