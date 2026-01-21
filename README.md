@@ -5,18 +5,23 @@
 kubectl-sdcio is the SDC specific kubectl plugin.
 
 ## subcommands
+
 kubectl-sdcio provides the following functionalities.
 
 ### blame
+
 The blame command provides a tree based view on the actual running device configuration of the given SDC target.
 
 It takes the `--target` parameter, that defines which targets is to be displayed.
 
-For every configured attribute you will see the highes preference value as well as the source of that value.
+For every configured attribute you will see the highes preference value as well
+as the source of that value.
+
 - `running` are attributes that come from the device itself, where no intent exist in sdcio.
 - `default` is all the default values that are present in the config, that are not overwritten by any specific config.
 - `<namespace>.<intentname>` is the reference to the intent that defined the actual highes preference value for that config attribute.
-```
+
+```bash
 mava@server01:~/projects/kubectl-sdcio$ kubectl sdcio blame --target sros
                     -----    │     🎯 default.sros
                     -----    │     └── 📦 configure
@@ -84,6 +89,133 @@ kubectl sdcio blame --target sros --filter-owner "production.intent-emergency" -
 
 # Combine multiple filters to find specific configuration
 kubectl sdcio blame --target sros --filter-path "/config/service/emergency/*" --filter-leaf "ambulance" --filter-owner "test-system.*"
+
+## search-for
+
+The search-for command searches for keywords in YANG models and returns matching paths. This is useful for discovering configuration paths and understanding the structure of YANG models. Outputs from the `search-for` command may be used as input of the `--path` option of the `gen` command.
+
+Usage
+
+```bash
+
+kubectl sdcio search-for --yang <yang-file> --yang-search <keyword> [options]
+```
+
+#### Required Parameters
+
+- **`--yang <path>`** : Path to the YANG module file (required)
+- **`--yang-search <keyword>`** : Keyword to search for. Supports wildcards (*) (required)
+
+#### Optional Parameters
+
+- **`--format <format>`**: Output format: text, json, or yaml (default: text)
+- **`--output <file> / -o <file>`**: Output file path (default: stdout)
+- **`--case-sensitive`**: Enable case-sensitive search (default: false)
+- **`--deepy`**: Include dependency information in results (default: true)
+
+### Wildcards
+
+The search supports wildcard patterns:
+
+- **`*`** : - matches any sequence of characters
+
+Examples
+
+```bash
+
+# Search for exact leaf name
+kubectl sdcio search-for --yang model.yang --yang-search ambulance
+
+# Search with wildcard
+kubectl sdcio search-for --yang model.yang --yang-search "*timeout*"
+
+# Search case-sensitive
+kubectl sdcio search-for --yang model.yang --yang-search "Interface" --case-sensitive
+
+# Output as JSON
+kubectl sdcio search-for --yang model.yang --yang-search "*config*" --format json
+
+# Save results to file
+kubectl sdcio search-for --yang model.yang --yang-search "*ip*" --output results.txt
+
+# Search without dependency information
+kubectl sdcio search-for --yang model.yang --yang-search "interface" --deepy=false
+```
+
+### Output Format
+
+The command returns matching paths with the following information:
+
+- Path: The full YANG path to the matching element
+- Leaf Name: The name of the leaf/node
+- Type: The YANG type (container, leaf, list, etc.)
+- Keys: List keys (if applicable)
+- Description: YANG description (if available)
+- Dependencies: Dependency information including leafrefs, when conditions, must statements, and reverse references (when --deepy is enabled)
+
+## gen
+
+The gen command generates configuration templates from YANG models in various
+formats. This is useful for creating initial configuration files or
+understanding the structure of configuration data.
+
+### Usage
+
+```bash
+
+kubectl sdcio gen --yang <yang-file> [options]
+```
+
+#### Required Parameters
+
+- **`--yang <path>`** : Path to the YANG module file (required)
+
+#### Optional Parameters
+
+- **`--path <path>`**: Path in the YANG model to generate template for (default: / - root)
+- **`--format <format>`**: Output format: json, yaml, xml, or sdc-conf (default: json)
+- **`--output <file> / -o <file>`**: Output file path (default: stdout)
+
+Examples
+
+```bash
+
+# Generate JSON template for entire model
+kubectl sdcio gen --yang model.yang
+
+# Generate template for specific path
+kubectl sdcio gen --yang openconfig-interfaces.yang --path /interfaces/interface
+
+# Generate YAML template and save to file
+kubectl sdcio gen --yang model.yang --path /system/config --format yaml --output config.yaml
+
+# Generate XML template
+kubectl sdcio gen --yang model.yang --path /configure/service --format xml
+
+# Generate SDC Config custom resource
+kubectl sdcio gen --yang model.yang --path /interfaces --format sdc-conf --output intent.yaml
+```
+
+### Template Features
+
+The generated templates include:
+
+- Example values based on YANG types (strings, integers, booleans, etc.)
+- Metadata for lists (keys, min/max elements)
+- Type information and constraints (ranges, patterns)
+- Proper structure for containers, lists, and leaf-lists
+- Key placeholders for list entries
+- Namespace information (for XML format)
+
+### SDC Config Format
+
+When using --format sdc-conf, the command generates a complete SDC Config custom resource with:
+
+- API version and kind
+- Metadata with name and namespace
+- Lifecycle configuration
+- Priority and revertive settings
+- Config section with the specified path and generated template
 
 ## Join us
 
