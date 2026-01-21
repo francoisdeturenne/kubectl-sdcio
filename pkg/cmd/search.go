@@ -22,13 +22,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
 	"encoding/json"
 
 	"github.com/openconfig/goyang/pkg/yang"
+	"github.com/sdcio/kubectl-sdcio/pkg/utils"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v2"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
@@ -241,15 +241,15 @@ func (o *SearchOptions) getEntryKeys(entry *yang.Entry) []string {
 
 func (o *SearchOptions) matchesSearch(entry *yang.Entry, fullPath string) bool {
 	// Check if leaf name matches
-	leafMatches := o.matchesPattern(entry.Name, o.keyword)
+	leafMatches := utils.MatchesPattern(entry.Name, o.keyword, false)
 
 	// Check if path matches
-	pathMatches := o.matchesPattern(fullPath, o.keyword)
+	pathMatches := utils.MatchesPattern(fullPath, o.keyword, false)
 
 	// Check if description matches (if available)
 	descMatches := false
 	if entry.Description != "" {
-		descMatches = o.matchesPattern(entry.Description, o.keyword)
+		descMatches = utils.MatchesPattern(entry.Description, o.keyword, false)
 	}
 
 	return leafMatches || pathMatches || descMatches
@@ -287,57 +287,6 @@ func (o *SearchOptions) getEntryType(entry *yang.Entry) string {
 		}
 		return "unknown"
 	}
-}
-
-// matchesPattern checks a string against a pattern (with wildcards)
-// Reuses the same logic from client.go
-func (o *SearchOptions) matchesPattern(text, pattern string) bool {
-	if pattern == "" {
-		return true
-	}
-
-	// Convert wildcard pattern to regex
-	regexPattern := o.wildCardToRegexp(pattern)
-
-	// Apply case sensitivity
-	if !o.caseSensitive {
-		text = strings.ToLower(text)
-		pattern = strings.ToLower(pattern)
-		regexPattern = "(?i)" + regexPattern
-	}
-
-	// Try regex match
-	matched, err := regexp.MatchString(regexPattern, text)
-	if err != nil {
-		// Fallback to simple contains
-		if !o.caseSensitive {
-			return strings.Contains(strings.ToLower(text), strings.ToLower(pattern))
-		}
-		return strings.Contains(text, pattern)
-	}
-	return matched
-}
-
-// wildCardToRegexp converts pattern with wildcard to regex
-// Reuses the same logic from client.go
-func (o *SearchOptions) wildCardToRegexp(pattern string) string {
-	// Escape any . in pattern
-	pattern = strings.ReplaceAll(pattern, ".", "\\.")
-	components := strings.Split(pattern, "*")
-	if len(components) == 1 {
-		// if len is 1, there are no *'s, return exact match pattern
-		return "^" + pattern + "$"
-	}
-	var result strings.Builder
-	for i, literal := range components {
-		// Replace * with .*
-		if i > 0 {
-			result.WriteString(".*")
-		}
-		// Quote any regular expression meta characters in the literal text
-		result.WriteString(regexp.QuoteMeta(literal))
-	}
-	return "^" + result.String() + "$"
 }
 
 // removeModulePrefix removes the module name from the beginning of the path
