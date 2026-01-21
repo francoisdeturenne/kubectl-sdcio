@@ -265,37 +265,6 @@ func (o *SearchOptions) getEntryType(entry *yang.Entry) string {
 	}
 }
 
-// removeModulePrefix removes the module name from the beginning of the path
-func (o *SearchOptions) removeModulePrefix(path string, moduleName string) string {
-	if moduleName == "" {
-		return path
-	}
-
-	// Remove leading slash for processing
-	cleanPath := strings.TrimPrefix(path, "/")
-
-	// Split the path
-	parts := strings.Split(cleanPath, "/")
-
-	// If the first part is the module name, remove it
-	if len(parts) > 0 {
-		// Extract the name without key predicates
-		firstPart := parts[0]
-		if idx := strings.Index(firstPart, "["); idx != -1 {
-			firstPart = firstPart[:idx]
-		}
-
-		if firstPart == moduleName {
-			parts = parts[1:]
-		}
-	}
-
-	// Reconstruct the path
-	if len(parts) == 0 {
-		return "/"
-	}
-	return "/" + strings.Join(parts, "/")
-}
 
 func (o *SearchOptions) outputResults(results []SearchResult, moduleName string) error {
 	if len(results) == 0 {
@@ -305,7 +274,7 @@ func (o *SearchOptions) outputResults(results []SearchResult, moduleName string)
 
 	// Remove module prefix from all result paths before output
 	for i := range results {
-		results[i].Path = o.removeModulePrefix(results[i].Path, moduleName)
+		results[i].Path = utils.RemoveModulePrefix(results[i].Path, moduleName)
 	}
 
 	var output string

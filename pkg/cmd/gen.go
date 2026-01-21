@@ -70,12 +70,6 @@ type SDCConfigItem struct {
 	Value interface{} `yaml:"value"`
 }
 
-// KeyValue represents a key-value pair extracted from the path
-type KeyValue struct {
-	Name  string
-	Value string
-}
-
 func stripKeysFromPath(path string) string {
 	// Use regex to remove key expressions like [name=<key>], [tac=<key>], etc.
 	re := regexp.MustCompile(`\[[^\]]+=<[^>]+>\]`)
@@ -169,7 +163,7 @@ func (o *GenOptions) generateTemplateFromYang() (map[string]interface{}, error) 
 	// Generate the template
 	template := o.generateTemplate(entry)
 	// Extract and remove keys from path for format sdc and xml
-	keysToExclude := o.extractKeysFromPath(o.modelPath)
+	keysToExclude := utils.ExtractKeysFromPath(o.modelPath)
 	if len(keysToExclude) > 0 && (o.outputFormat == "sdc-conf" || o.outputFormat == "xml") {
 		template = o.removeKeysFromTemplate(template, keysToExclude)
 	}
@@ -562,7 +556,7 @@ func (o *GenOptions) outputXMLWithPath(data interface{}) error {
 		}
 	}
 	// Extract keys from the original path
-	pathKeys := o.extractPathKeysWithValues(o.modelPath)
+	pathKeys := utils.ExtractPathKeysWithValues(o.modelPath)
 
 	// Start building XML with root element and namespace
 	rootName := ""
@@ -590,7 +584,7 @@ func (o *GenOptions) outputXMLWithPath(data interface{}) error {
 	return nil
 }
 
-func (o *GenOptions) buildXMLPath(pathSegments []string, pathKeys map[string][]KeyValue, data interface{}, depth int) {
+func (o *GenOptions) buildXMLPath(pathSegments []string, pathKeys map[string][]utils.KeyValue, data interface{}, depth int) {
 	indent := strings.Repeat(" ", depth)
 
 	if len(pathSegments) == 0 {
@@ -642,44 +636,6 @@ func (o *GenOptions) outputXMLData(data interface{}, depth int) {
 	default:
 		fmt.Fprintf(o.Out, "%s%v\n", indent, v)
 	}
-}
-
-// extractPathKeysWithValues extracts keys and their placeholder values from the path
-// Returns a map where the key is the list name and value is a slice of KeyValue pairs
-func (o *GenOptions) extractPathKeysWithValues(path string) map[string][]KeyValue {
-	result := make(map[string][]KeyValue)
-
-	// Match patterns like registered-ue-per-ta-list[name=<key>]
-	// or tac[serving-plmn=<key>,tac=<key>]
-	re := regexp.MustCompile(`([^/\[]+)\[([^\]]+)\]`)
-	matches := re.FindAllStringSubmatch(path, -1)
-
-	for _, match := range matches {
-		if len(match) > 2 {
-			listName := match[1]
-			keysStr := match[2]
-
-			// Parse individual keys
-			keyPairs := strings.Split(keysStr, ",")
-			var keyValues []KeyValue
-
-			for _, keyPair := range keyPairs {
-				parts := strings.Split(keyPair, "=")
-				if len(parts) == 2 {
-					keyName := strings.TrimSpace(parts[0])
-					keyValue := strings.Trim(strings.TrimSpace(parts[1]), "<>")
-					keyValues = append(keyValues, KeyValue{
-						Name:  keyName,
-						Value: keyValue,
-					})
-				}
-			}
-
-			result[listName] = keyValues
-		}
-	}
-
-	return result
 }
 
 // CmdGen provides a cobra command wrapping GenOptions
@@ -766,22 +722,6 @@ func (o *GenOptions) removeKeysFromTemplate(template map[string]interface{}, key
 	}
 
 	return result
-}
-
-// find keys in path
-func (o *GenOptions) extractKeysFromPath(path string) []string {
-	var keys []string
-	// Match patterns like [name=<key>], [tac=<key>], etc.
-	//re := regexp.MustCompile(`\[([^=]+)=<[^>]+>\]`)
-	re := regexp.MustCompile(`([^=\[,]+)=<[^>]+>`)
-	matches := re.FindAllStringSubmatch(path, -1)
-
-	for _, match := range matches {
-		if len(match) > 1 {
-			keys = append(keys, match[1])
-		}
-	}
-	return keys
 }
 
 // test attribute/key
